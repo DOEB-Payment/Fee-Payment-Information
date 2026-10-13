@@ -312,3 +312,6 @@ main.container,.container.app-view{margin-left:245px;max-width:none;padding-left
 .delete-year-btn:disabled{opacity:.45;cursor:not-allowed}
 
 .management-delete-year-btn{margin-top:0;width:auto;white-space:nowrap}
+
+/* ซ่อนส่วนกรอกข้อมูลนำรายได้ส่ง กค. พรบ.42 + พรบ.43 ตามคำขอ */
+.gov-group{display:none !important;}

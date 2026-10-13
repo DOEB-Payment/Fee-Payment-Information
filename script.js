@@ -70,6 +70,7 @@ function num(v){
   const n = Number(s);
   return Number.isFinite(n) ? (negative ? -Math.abs(n) : n) : 0;
 }
+const fmtFull = n => Math.round(Number(n || 0)).toLocaleString("th-TH");
 const fmt = n => {
   n = Number(n || 0);
   const a = Math.abs(n);
@@ -171,9 +172,11 @@ function monthTotals(rows){
   rows.forEach(row=>{ const month=clean(row[M])||"ไม่ระบุ"; result[month]=(result[month]||0)+rowCount(row); });
   return result;
 }
+// เรียงเดือนตามปีงบประมาณไทย: ตุลาคม–กันยายน (ไม่ใช่มกราคม–ธันวาคม)
+const FISCAL_MONTHS = ["ตุลาคม","พฤศจิกายน","ธันวาคม","มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน"];
 function orderedMonths(values){
-  const set=new Set(values.map(clean).filter(Boolean));
-  return MONTHS.filter(m=>set.has(m)).concat([...set].filter(m=>!MONTHS.includes(m)));
+  const set=new Set(values.map(v=>normalizeMonth(v)).map(clean).filter(Boolean));
+  return FISCAL_MONTHS.filter(m=>set.has(m)).concat([...set].filter(m=>!FISCAL_MONTHS.includes(m)));
 }
 function insights(rows){
   const totals=monthTotals(rows), months=Object.keys(totals);
@@ -206,7 +209,7 @@ function renderForecast(r){
   charts.forecast=new Chart(el,{type:"line",data:{labels:labels.concat(future),datasets:[{label:"ข้อมูลจริง",data:vals.concat([null,null,null]),tension:.25,pointRadius:4,borderWidth:3},{label:"พยากรณ์",data:Array(vals.length).fill(null).concat(fc),tension:.25,pointRadius:4,borderWidth:3,borderDash:[7,6]}]},options:{...baseOptions(),plugins:{...baseOptions().plugins,tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.raw)} ราย`}}},scales:{...baseOptions().scales,y:{...baseOptions().scales.y,ticks:{callback:v=>fmt(v)}}}}});
 }
 function update(){
-  const r=filtered(); $("people").textContent=fmt(r.reduce((a,x)=>a+rowCount(x),0)); $("money").textContent=fmt(r.reduce((a,x)=>a+rowMoney(x),0));
+  const r=filtered(); $("people").textContent=fmtFull(r.reduce((a,x)=>a+rowCount(x),0)); $("money").textContent=fmtFull(r.reduce((a,x)=>a+rowMoney(x),0));
   $("months").textContent=new Set(r.map(x=>clean(x[M])).filter(Boolean)).size; $("laws").textContent=new Set(r.map(x=>clean(x[L])).filter(Boolean)).size;
   insights(r); destroyCharts();
   // ถ้าเลือกช่องทางชำระ ให้กราฟช่องทางแสดงเฉพาะช่องทางที่เลือก
@@ -524,8 +527,8 @@ function totalTradeCount(e){ return num(e.tradeCount); }
 function totalTradeMoney(e){ return num(e.tradeMoney); }
 function totalGovCount(e){ return num(e.govCount); }
 function totalGovMoney(e){ return num(e.govMoney); }
-function reportTotalCount(e){ return totalReceiptCount(e)+totalAppCount(e)+totalTradeCount(e); }
-function reportTotalMoney(e){ return totalReceiptMoney(e)+totalAppMoney(e)+totalTradeMoney(e); }
+function reportTotalCount(e){ return totalSafetyCount(e)+totalReceiptCount(e)+totalAppCount(e)+totalTradeCount(e)+totalGovCount(e); }
+function reportTotalMoney(e){ return totalSafetyMoney(e)+totalReceiptMoney(e)+totalAppMoney(e)+totalTradeMoney(e)+totalGovMoney(e); }
 
 function manualEntriesToRows(entries){
   return entries.map(e=>({
@@ -733,6 +736,7 @@ async function addDailyEntry(){
     saveManualEntries(entries);
     setData(excelCacheRows,"update.xlsx");
     resetEntryForm();
+    refreshEntryDownloadFilters();
     renderEntryTable();
     renderSummary();
     alert(cloudReady?"บันทึกข้อมูลลง Cloud เรียบร้อยแล้ว":"บันทึกข้อมูลไว้ในเครื่องนี้แล้ว");
@@ -789,7 +793,7 @@ function renderEntryTable(){
     const ec=e.channel||"ธนาคาร";
     return (!filterYear||clean(e.year)===filterYear) &&
            (!filterMonth||clean(e.month)===filterMonth) &&
-           (filterChannel ? ec===filterChannel : ec===activeEntryChannel) && (!filterLaw || clean(e.law)===filterLaw);
+           (!filterChannel || ec===filterChannel) && (!filterLaw || clean(e.law)===filterLaw);
   }).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   const cols={
     "ศบธ.":[
@@ -842,25 +846,29 @@ function renderEntryTable(){
 
 function summaryRows(){
   const entries=getManualEntries(); const y=clean($("summaryYear")?.value), m=clean($("summaryMonth")?.value);
-  return entries.filter(e=>(!y||e.year===y)&&(!m||e.month===m));
+  return entries.filter(e=>{
+    const ey=clean(e.year)||fiscalYearFromDate(e.date);
+    const em=clean(e.month)||monthFromDate(e.date);
+    return (!y||ey===y)&&(!m||em===m);
+  });
 }
 function renderSummary(){
   if(!$("summaryTable"))return;
   const entries=getManualEntries();
-  const years=[...new Set(entries.map(e=>clean(e.year)).filter(Boolean))].sort();
+  const years=[...new Set(entries.map(e=>clean(e.year)||fiscalYearFromDate(e.date)).filter(Boolean))].sort();
   const sy=clean($("summaryYear")?.value), sm=clean($("summaryMonth")?.value), filteredEntries=summaryRows();
   const yearEl=$("summaryYear"); if(yearEl){const old=yearEl.value;yearEl.innerHTML='<option value="">ทุกปี</option>'+years.map(y=>`<option value="${esc(y)}">${esc(y)}</option>`).join("");if(years.includes(old))yearEl.value=old;}
-  const monthEl=$("summaryMonth"); if(monthEl){const months=orderedMonths(filteredEntries.map(e=>e.month));const old=monthEl.value;monthEl.innerHTML='<option value="">ทุกเดือน</option>'+months.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("");if(months.includes(old))monthEl.value=old;}
+  const monthEl=$("summaryMonth"); if(monthEl){const months=orderedMonths(filteredEntries.map(e=>clean(e.month)||monthFromDate(e.date)));const old=monthEl.value;monthEl.innerHTML='<option value="">ทุกเดือน</option>'+months.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("");if(months.includes(old))monthEl.value=old;}
   $("sumRows").textContent=filteredEntries.length.toLocaleString("th-TH");
   $("sumCount").textContent=filteredEntries.reduce((a,e)=>a+reportTotalCount(e),0).toLocaleString("th-TH");
-  $("sumMoney").textContent=filteredEntries.reduce((a,e)=>a+reportTotalMoney(e),0).toLocaleString("th-TH",{maximumFractionDigits:2});
+  $("sumMoney").textContent=Math.round(filteredEntries.reduce((a,e)=>a+reportTotalMoney(e),0)).toLocaleString("th-TH");
   $("sumDays").textContent=new Set(filteredEntries.map(e=>e.date).filter(Boolean)).size.toLocaleString("th-TH");
   const groups={};
-  filteredEntries.forEach(e=>{const key=`${e.year}|${e.month}`;if(!groups[key])groups[key]={year:e.year,month:e.month,days:new Set(),safetyCount:0,safetyMoney:0,receiptCount:0,receiptMoney:0,appCount:0,appMoney:0,tradeCount:0,tradeMoney:0,govCount:0,govMoney:0};groups[key].days.add(e.date);groups[key].receiptCount+=totalReceiptCount(e);groups[key].receiptMoney+=totalReceiptMoney(e);groups[key].appCount+=totalAppCount(e);groups[key].appMoney+=totalAppMoney(e);groups[key].tradeCount+=totalTradeCount(e);groups[key].tradeMoney+=totalTradeMoney(e);groups[key].govCount+=totalGovCount(e);groups[key].govMoney+=totalGovMoney(e);});
+  filteredEntries.forEach(e=>{const ey=clean(e.year)||fiscalYearFromDate(e.date), em=clean(e.month)||monthFromDate(e.date);const key=`${ey}|${em}`;if(!groups[key])groups[key]={year:ey,month:em,days:new Set(),safetyCount:0,safetyMoney:0,receiptCount:0,receiptMoney:0,appCount:0,appMoney:0,tradeCount:0,tradeMoney:0,govCount:0,govMoney:0};groups[key].days.add(e.date);groups[key].receiptCount+=totalReceiptCount(e);groups[key].receiptMoney+=totalReceiptMoney(e);groups[key].appCount+=totalAppCount(e);groups[key].appMoney+=totalAppMoney(e);groups[key].tradeCount+=totalTradeCount(e);groups[key].tradeMoney+=totalTradeMoney(e);groups[key].govCount+=totalGovCount(e);groups[key].govMoney+=totalGovMoney(e);});
   const arr=Object.values(groups).sort((a,b)=>String(a.year).localeCompare(String(b.year))||MONTHS.indexOf(a.month)-MONTHS.indexOf(b.month));
   let html='<thead><tr><th>ปีงบประมาณ</th><th>เดือน</th><th>จำนวนวันที่มีข้อมูล</th><th>Safety ใบเสร็จ</th><th>Safety บาท</th><th>Receipt ใบเสร็จ</th><th>Receipt บาท</th><th>App ใบเสร็จ</th><th>App บาท</th><th>Trade ใบเสร็จ</th><th>Trade บาท</th><th>นำรายได้ ใบเสร็จ</th><th>นำรายได้ บาท</th><th>รวมใบเสร็จ</th><th>รวมเงิน</th></tr></thead><tbody>';
   if(!arr.length)html+='<tr><td colspan="15" class="empty-cell">ยังไม่มีข้อมูลตามตัวกรอง</td></tr>';
-  arr.forEach(g=>{const totalC=g.safetyCount+g.receiptCount+g.appCount+g.tradeCount+g.govCount,totalM=g.safetyMoney+g.receiptMoney+g.appMoney+g.tradeMoney+g.govMoney;html+=`<tr><td>${esc(g.year)}</td><td>${esc(g.month)}</td><td>${g.days.size.toLocaleString("th-TH")}</td><td>${g.safetyCount.toLocaleString("th-TH")}</td><td>${g.safetyMoney.toLocaleString("th-TH",{minimumFractionDigits:2})}</td><td>${g.receiptCount.toLocaleString("th-TH")}</td><td>${g.receiptMoney.toLocaleString("th-TH",{minimumFractionDigits:2})}</td><td>${g.appCount.toLocaleString("th-TH")}</td><td>${g.appMoney.toLocaleString("th-TH",{minimumFractionDigits:2})}</td><td>${g.tradeCount.toLocaleString("th-TH")}</td><td>${g.tradeMoney.toLocaleString("th-TH",{minimumFractionDigits:2})}</td><td>${g.govCount.toLocaleString("th-TH")}</td><td>${g.govMoney.toLocaleString("th-TH",{minimumFractionDigits:2})}</td><td><b>${totalC.toLocaleString("th-TH")}</b></td><td><b>${totalM.toLocaleString("th-TH",{minimumFractionDigits:2})}</b></td></tr>`;});
+  arr.forEach(g=>{const totalC=g.safetyCount+g.receiptCount+g.appCount+g.tradeCount+g.govCount,totalM=g.safetyMoney+g.receiptMoney+g.appMoney+g.tradeMoney+g.govMoney;html+=`<tr><td>${esc(g.year)}</td><td>${esc(g.month)}</td><td>${g.days.size.toLocaleString("th-TH")}</td><td>${g.safetyCount.toLocaleString("th-TH")}</td><td>${g.safetyMoney.toLocaleString("th-TH",{maximumFractionDigits:0})}</td><td>${g.receiptCount.toLocaleString("th-TH")}</td><td>${g.receiptMoney.toLocaleString("th-TH",{maximumFractionDigits:0})}</td><td>${g.appCount.toLocaleString("th-TH")}</td><td>${g.appMoney.toLocaleString("th-TH",{maximumFractionDigits:0})}</td><td>${g.tradeCount.toLocaleString("th-TH")}</td><td>${g.tradeMoney.toLocaleString("th-TH",{maximumFractionDigits:0})}</td><td>${g.govCount.toLocaleString("th-TH")}</td><td>${g.govMoney.toLocaleString("th-TH",{maximumFractionDigits:0})}</td><td><b>${totalC.toLocaleString("th-TH")}</b></td><td><b>${totalM.toLocaleString("th-TH",{maximumFractionDigits:0})}</b></td></tr>`;});
   html+='</tbody>'; $("summaryTable").innerHTML=html;
 }
 
