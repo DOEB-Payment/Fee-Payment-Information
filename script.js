@@ -591,10 +591,12 @@ function initThaiDatePickers(){
     const target=$(targetId), wrap=document.querySelector(`.thai-calendar-wrap[data-target="${targetId}"]`);
     if(!target||!wrap)return;
     const button=wrap.querySelector('.thai-date-button'), calendar=wrap.querySelector('.thai-calendar'), label=wrap.querySelector('.date-button-text');
-    let selected=target.value?parseUserDate(target.value):"";
-    let view=selected?new Date(selected+"T00:00:00"):new Date();
+    const multi = targetId === "entryDate";
+    let selected=multi ? (target.value ? target.value.split(",").map(parseUserDate).filter(Boolean) : []) : (target.value?parseUserDate(target.value):"");
+    let view=(multi ? selected[0] : selected)?new Date((multi ? selected[0] : selected)+"T00:00:00"):new Date();
     if(view.getFullYear()<minBE-543||view.getFullYear()>maxBE-543)view=new Date(currentCE,currentCE?now.getMonth():0,1);
-    pickerState[targetId]={target,button,calendar,label,get selected(){return selected},set selected(v){selected=v},get view(){return view},set view(v){view=v}};
+    pickerState[targetId]={target,button,calendar,label,multi,get selected(){return selected},set selected(v){selected=v},get view(){return view},set view(v){view=v}};
+    window.__thaiPickerState=pickerState;
 
     function render(){
       const st=pickerState[targetId], y=st.view.getFullYear(), m=st.view.getMonth();
@@ -607,7 +609,7 @@ function initThaiDatePickers(){
       for(let i=0;i<first;i++) cells+='<span class="cal-day empty"></span>';
       for(let d=1;d<=days;d++){
         const iso=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const active=st.selected===iso?' selected':'';
+        const active=(st.multi ? st.selected.includes(iso) : st.selected===iso)?' selected':'';
         const today=iso===`${currentCE}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`?' today':'';
         cells+=`<button type="button" class="cal-day${active}${today}" data-iso="${iso}">${d}</button>`;
       }
@@ -623,9 +625,9 @@ function initThaiDatePickers(){
         <div class="cal-title">${esc(months[m])} ${be}</div>
         <div class="cal-weekdays">${weekdays.map(x=>`<span>${x}</span>`).join('')}</div>
         <div class="cal-grid">${cells}</div>
-        <div class="cal-bottom"><button type="button" class="cal-today">วันนี้</button><button type="button" class="cal-clear">ล้างวันที่</button></div>`;
-      label.textContent=fmtButtonDate(st.selected);
-      button.classList.toggle('has-value',!!st.selected);
+        <div class="cal-bottom"><button type="button" class="cal-today">${st.multi?'เพิ่มวันนี้':'วันนี้'}</button><button type="button" class="cal-clear">ล้างวันที่</button>${st.multi?'<button type="button" class="cal-done">เสร็จสิ้น</button>':''}</div>`;
+      label.textContent=st.multi ? (st.selected.length ? `เลือกแล้ว ${st.selected.length} วัน` : "เลือกวันที่ได้หลายวัน") : fmtButtonDate(st.selected);
+      button.classList.toggle('has-value',st.multi ? st.selected.length>0 : !!st.selected);
       button.setAttribute('aria-expanded', calendar.classList.contains('open')?'true':'false');
 
       calendar.querySelector('[data-nav="prev"]')?.addEventListener('click',()=>{st.view=new Date(y,m-1,1);render()});
@@ -633,16 +635,21 @@ function initThaiDatePickers(){
       calendar.querySelector('.cal-month')?.addEventListener('change',e=>{st.view=new Date(y,Number(e.target.value),1);render()});
       calendar.querySelector('.cal-year')?.addEventListener('change',e=>{st.view=new Date(Number(e.target.value)-543,m,1);render()});
       calendar.querySelectorAll('.cal-day[data-iso]').forEach(btn=>btn.addEventListener('click',()=>{
-        st.selected=btn.dataset.iso; target.value=st.selected; label.textContent=fmtButtonDate(st.selected); button.classList.add('has-value'); closeAllCalendars();
+        const iso=btn.dataset.iso;
+        if(st.multi){ st.selected=st.selected.includes(iso)?st.selected.filter(d=>d!==iso):[...st.selected,iso].sort(); target.value=st.selected.join(","); render(); }
+        else { st.selected=iso; target.value=iso; label.textContent=fmtButtonDate(iso); button.classList.add('has-value'); closeAllCalendars(); }
       }));
       calendar.querySelector('.cal-today')?.addEventListener('click',()=>{
-        st.selected=`${currentCE}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; target.value=st.selected; st.view=new Date(currentCE,now.getMonth(),1); render(); closeAllCalendars();
+        const today=`${currentCE}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        if(st.multi){st.selected=st.selected.includes(today)?st.selected:[...st.selected,today].sort();target.value=st.selected.join(",");st.view=new Date(currentCE,now.getMonth(),1);render();}
+        else {st.selected=today;target.value=today;st.view=new Date(currentCE,now.getMonth(),1);render();closeAllCalendars();}
       });
-      calendar.querySelector('.cal-clear')?.addEventListener('click',()=>{st.selected='';target.value='';label.textContent='เลือกวันที่';button.classList.remove('has-value');closeAllCalendars()});
+      calendar.querySelector('.cal-clear')?.addEventListener('click',()=>{st.selected=st.multi?[]:'';target.value='';render();if(!st.multi)closeAllCalendars()});
+      calendar.querySelector('.cal-done')?.addEventListener('click',()=>closeAllCalendars());
     }
     // ป้องกันคลิกภายในปฏิทินไม่ให้ event ไปถึง window แล้วปิดปฏิทิน
     calendar.addEventListener('click',e=>e.stopPropagation());
-    button.addEventListener('click',e=>{e.stopPropagation();closeAllCalendars(calendar);calendar.classList.toggle('open');button.setAttribute('aria-expanded',calendar.classList.contains('open')?'true':'false')});
+    button.addEventListener('click',e=>{e.stopPropagation();closeAllCalendars(calendar);if(!calendar.classList.contains('open'))render();calendar.classList.toggle('open');button.setAttribute('aria-expanded',calendar.classList.contains('open')?'true':'false')});
     render();
   }
   function closeAllCalendars(except=null){
@@ -655,8 +662,10 @@ function initThaiDatePickers(){
 function clearThaiDatePicker(targetId){
   const t=$(targetId); if(!t)return;
   t.value='';
+  const st=window.__thaiPickerState?.[targetId];
+  if(st){st.selected=st.multi?[]:''; if(st.multi)st.calendar.innerHTML=st.calendar.innerHTML;}
   const wrap=document.querySelector(`.thai-calendar-wrap[data-target="${targetId}"]`);
-  if(wrap){ const label=wrap.querySelector('.date-button-text'); const button=wrap.querySelector('.thai-date-button'); if(label)label.textContent='เลือกวันที่'; if(button)button.classList.remove('has-value'); }
+  if(wrap){ const label=wrap.querySelector('.date-button-text'); const button=wrap.querySelector('.thai-date-button'); if(label)label.textContent=targetId==='entryDate'?'เลือกวันที่ได้หลายวัน':'เลือกวันที่'; if(button)button.classList.remove('has-value'); }
 }
 const ENTRY_FIELDS_BY_CHANNEL = {
   "ศบธ.": ["safety","receipt","trade","gov"],
@@ -701,8 +710,9 @@ function resetEntryForm(){
 
 async function addDailyEntry(){
   const dateInput=clean($("entryDate").value), sentInput=clean($("entrySent").value);
-  const date=parseUserDate(dateInput), sent=sentInput?parseUserDate(sentInput):"";
-  if(!date){alert("กรุณาเลือกวันที่ชำระ");return;}
+  const dates=[...new Set(dateInput.split(",").map(parseUserDate).filter(Boolean))].sort();
+  const sent=sentInput?parseUserDate(sentInput):"";
+  if(!dates.length){alert("กรุณาเลือกวันที่ชำระอย่างน้อย 1 วัน");return;}
   if(sentInput&&!sent){alert("กรุณาเลือกวันที่ส่ง");return;}
 
   const sc=num($("safetyCount")?.value), sm=num($("safetyMoney")?.value), scc=num($("safetyCancelCount")?.value);
@@ -721,25 +731,25 @@ async function addDailyEntry(){
   const hasAny=active.some(section=>relevant[section].some(v=>typeof v==="number"?v!==0:!!v));
   if(!hasAny){alert("กรุณากรอกข้อมูลของช่องทางนี้อย่างน้อย 1 รายการ");return;}
 
-  const entry={
-    id:(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random()),
-    channel:activeEntryChannel,date,year:fiscalYearFromDate(date),month:monthFromDate(date),law:clean($("entryLaw")?.value),sent,
+  const entryBase={
+    channel:activeEntryChannel,law:clean($("entryLaw")?.value),sent,
     safetyFrom:clean($("safetyFrom")?.value),safetyTo:clean($("safetyTo")?.value),safetyCount:sc,safetyMoney:sm,safetyCancelCount:scc,safetyCancelNo:clean($("safetyCancelNo")?.value),
     receiptFrom:clean($("receiptFrom")?.value),receiptTo:clean($("receiptTo")?.value),receiptCount:rc,receiptMoney:rm,receiptCancelCount:rcc,receiptCancelNo:clean($("receiptCancelNo")?.value),
     appBookNo:clean($("appBookNo")?.value),appFrom:clean($("appFrom")?.value),appTo:clean($("appTo")?.value),appCount:ac,appMoney:am,appCancelCount:acc,appCancelNo:clean($("appCancelNo")?.value),
     tradeFrom:clean($("tradeFrom")?.value),tradeTo:clean($("tradeTo")?.value),tradeCount:tc,tradeMoney:tm,tradeCancelCount:tcc,tradeCancelNo:clean($("tradeCancelNo")?.value),
     govCount:gc,govMoney:gm,note:clean($("entryNote")?.value),pn:clean($("entryPn")?.value),edc:clean($("entryEdc")?.value)
   };
+  const newEntries=dates.map((date,i)=>({...entryBase,id:(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+i+"-"+Math.random()),date,year:fiscalYearFromDate(date),month:monthFromDate(date)}));
   try{
-    if(cloudReady) await cloudInsertEntry(entry);
-    const entries=getManualEntries().concat(entry);
+    if(cloudReady) for(const entry of newEntries) await cloudInsertEntry(entry);
+    const entries=getManualEntries().concat(newEntries);
     saveManualEntries(entries);
     setData(excelCacheRows,"update.xlsx");
     resetEntryForm();
     refreshEntryDownloadFilters();
     renderEntryTable();
     renderSummary();
-    alert(cloudReady?"บันทึกข้อมูลลง Cloud เรียบร้อยแล้ว":"บันทึกข้อมูลไว้ในเครื่องนี้แล้ว");
+    alert(`${cloudReady?"บันทึกข้อมูลลง Cloud เรียบร้อยแล้ว":"บันทึกข้อมูลไว้ในเครื่องนี้แล้ว"} จำนวน ${newEntries.length} วัน`);
   }catch(e){console.error(e);alert("บันทึกข้อมูลไม่สำเร็จ: "+e.message);}
 }
 
