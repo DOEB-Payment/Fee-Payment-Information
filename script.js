@@ -144,6 +144,14 @@ function fillChannels() {
     const o = document.createElement("option"); o.value = name; o.textContent = name; el.appendChild(o);
   });
 }
+function fiscalMonthLabel(month, fiscalYear){
+  const shortMonths={"มกราคม":"ม.ค.","กุมภาพันธ์":"ก.พ.","มีนาคม":"มี.ค.","เมษายน":"เม.ย.","พฤษภาคม":"พ.ค.","มิถุนายน":"มิ.ย.","กรกฎาคม":"ก.ค.","สิงหาคม":"ส.ค.","กันยายน":"ก.ย.","ตุลาคม":"ต.ค.","พฤศจิกายน":"พ.ย.","ธันวาคม":"ธ.ค."};
+  const fy=Number(fiscalYear||0), monthNumber=MONTHS.indexOf(clean(month))+1;
+  if(!fy || !monthNumber) return clean(month);
+  // ปีงบประมาณเริ่มเดือนตุลาคม: ต.ค.–ธ.ค. เป็นปีปฏิทินก่อนหน้า
+  const calendarYear=monthNumber>=10?fy-1:fy;
+  return `${clean(month)} (${shortMonths[clean(month)]||clean(month)}${String(calendarYear).slice(-2)})`;
+}
 function refreshMonthOptions(){
   const el=$("month");
   const selected=clean(el.value);
@@ -152,7 +160,7 @@ function refreshMonthOptions(){
   const months=orderedMonths(uniqueFromRows(rows,M));
   el.innerHTML='<option value="">ทั้งหมด</option>';
   months.forEach(v=>{
-    const o=document.createElement("option"); o.value=v; o.textContent=v; el.appendChild(o);
+    const o=document.createElement("option"); o.value=v; o.textContent=fiscalMonthLabel(v,y); el.appendChild(o);
   });
   if(selected && months.includes(selected)) el.value=selected;
 }
@@ -318,7 +326,7 @@ function setData(json,fileName=""){
 }
 async function loadDefault(){
   // ใช้ไฟล์ Excel เป็นแหล่งข้อมูลหลัก เพราะ data.json รุ่นเดิมขาดข้อมูลเดือนธันวาคม 2568
-  const response=await fetch("data/update.xlsx?v=20260917-2", {cache:"no-store"});
+  const response=await fetch("data/update.xlsx?v=20261027-1", {cache:"no-store"});
   if(!response.ok) throw new Error("โหลด data/update.xlsx ไม่สำเร็จ");
   const buffer=await response.arrayBuffer();
   const wb=XLSX.read(buffer,{type:"array",cellDates:true});
@@ -515,6 +523,7 @@ function displayDate(value){
   return `${Number(m[3])} ${THAI_MONTH_SHORT[Number(m[2])-1]} ${Number(m[1])+543}`;
 }
 function monthFromDate(iso){ if(!iso) return ""; const d=new Date(iso+"T00:00:00"); return Number.isNaN(d.getTime())?"":MONTHS[d.getMonth()]; }
+function availableFiscalYears(values=[]){ const current=Number(fiscalYearFromDate(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0")+"-"+String(new Date().getDate()).padStart(2,"0"))); const set=new Set(values.map(v=>String(v)).filter(Boolean)); if(Number.isFinite(current)){set.add(String(current));set.add(String(current-1));} return [...set].sort((a,b)=>Number(a)-Number(b)); }
 function fiscalYearFromDate(iso){ if(!iso) return ""; const d=new Date(iso+"T00:00:00"); if(Number.isNaN(d.getTime()))return ""; const y=d.getFullYear(),m=d.getMonth()+1; return String(y+(m>=10?544:543)); }
 function totalSafetyCount(e){ return num(e.safetyCount); }
 function totalSafetyMoney(e){ return num(e.safetyMoney); }
@@ -865,7 +874,7 @@ function summaryRows(){
 function renderSummary(){
   if(!$("summaryTable"))return;
   const entries=getManualEntries();
-  const years=[...new Set(entries.map(e=>clean(e.year)||fiscalYearFromDate(e.date)).filter(Boolean))].sort();
+  const years=availableFiscalYears(entries.map(e=>clean(e.year)||fiscalYearFromDate(e.date)).filter(Boolean));
   const sy=clean($("summaryYear")?.value), sm=clean($("summaryMonth")?.value), filteredEntries=summaryRows();
   const yearEl=$("summaryYear"); if(yearEl){const old=yearEl.value;yearEl.innerHTML='<option value="">ทุกปี</option>'+years.map(y=>`<option value="${esc(y)}">${esc(y)}</option>`).join("");if(years.includes(old))yearEl.value=old;}
   const monthEl=$("summaryMonth"); if(monthEl){const months=orderedMonths(filteredEntries.map(e=>clean(e.month)||monthFromDate(e.date)));const old=monthEl.value;monthEl.innerHTML='<option value="">ทุกเดือน</option>'+months.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("");if(months.includes(old))monthEl.value=old;}
@@ -956,7 +965,7 @@ function refreshEntryDownloadFilters(){
   if(!yEl || !mEl)return;
   const oldY=yEl.value, oldM=mEl.value, oldL=lEl?.value||"", oldC=cEl?.value||"";
 
-  const years=[...new Set(all.map(e=>clean(e.year)||clean(fiscalYearFromDate(e.date))).filter(Boolean))]
+  const years=availableFiscalYears(all.map(e=>clean(e.year)||clean(fiscalYearFromDate(e.date))).filter(Boolean))
     .sort((a,b)=>Number(a)-Number(b));
   yEl.innerHTML='<option value="">ทุกปี</option>'+years.map(y=>`<option value="${esc(y)}">${esc(y)}</option>`).join("");
   if(years.includes(oldY)) yEl.value=oldY;
@@ -1307,7 +1316,7 @@ function initAppNavigation(){
 // Cache imported rows so adding/deleting daily entries never loses the original Excel data.
 const _oldLoadDefault = loadDefault;
 loadDefault = async function(){
-  const response=await fetch("data/update.xlsx?v=20260922-1",{cache:"no-store"});
+  const response=await fetch("data/update.xlsx?v=20261027-1",{cache:"no-store"});
   if(!response.ok)throw new Error("โหลด data/update.xlsx ไม่สำเร็จ");
   const buffer=await response.arrayBuffer();const wb=XLSX.read(buffer,{type:"array",cellDates:true});
   excelCacheRows=excelToRows(wb);setData(excelCacheRows,"update.xlsx");
